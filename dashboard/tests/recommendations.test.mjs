@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import { validateData, filterGroups, rowKey, toCsv } from '../recommendations.mjs';
+const data = JSON.parse(await readFile(new URL('../mock_recommendations.json', import.meta.url)));
+test('mock follows the documented contract', () => { assert.equal(validateData(data),data); assert.deepEqual([...new Set(data.suppliers.flatMap(s => s.items.map(r => r.urgency)))].sort(),['critical','planned','soon']); });
+test('invalid urgency and numeric quantities are rejected',() => { for (const change of [{urgency:'urgent'},{current_stock:-1},{recommended_qty:'10'}]) { const copy = structuredClone(data); Object.assign(copy.suppliers[0].items[0],change); assert.throws(() => validateData(copy)); } });
+test('combined filters search case-insensitively and omit empty suppliers',() => { const found = filterGroups(data.suppliers,{search:'  выкл ',supplier:'IEK',urgency:'critical'}); assert.equal(found.length,1); assert.equal(found[0].items.length,1); assert.equal(filterGroups(data.suppliers,{search:'missing'}).length,0); assert.equal(filterGroups(data.suppliers,{search:'030200874_'})[0].items.length,1); });
+test('approval keys distinguish the same SKU across suppliers',() => { assert.notEqual(rowKey(data.suppliers[0],{sku:'shared'}),rowKey(data.suppliers[1],{sku:'shared'})); });
+test('CSV preserves urgency, includes approval, escapes cells and prevents formula injection',() => { const groups = structuredClone(data.suppliers.slice(0,1)); groups[0].items = groups[0].items.slice(0,1); groups[0].items[0].name = '=SUM(1;2)"'; const csv = toCsv(groups,new Set([rowKey(groups[0],groups[0].items[0])])); assert.ok(csv.startsWith('\uFEFF')); assert.ok(csv.includes('"critical"')); assert.ok(csv.includes('"\'=SUM(1;2)"""')); assert.ok(csv.endsWith('"true"')); assert.equal(csv.split('\r\n').length,2); });

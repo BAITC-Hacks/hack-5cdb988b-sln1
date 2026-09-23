@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="ru">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Закупки · HackAlem</title><link rel="stylesheet" href="styles.css"></head>
+<body>
+<header><a class="brand" href="./"><span class="logo">H</span> HackAlem <span class="brand-note">/ закупки</span></a><span class="demo">● Демо на моковых данных</span></header>
+<main>
+<div class="heading"><div><div class="eyebrow">РАБОЧЕЕ МЕСТО ЗАКУПЩИКА</div><h1>Рекомендации к заказу</h1><p>Проверьте потребность, выберите позиции и подтвердите заказ.</p></div><button id="export" disabled>↓ Экспорт выборки в CSV</button></div>
+<section class="metrics" aria-label="Сводка"><div><span>Поставщиков</span><strong id="supplier-count">—</strong></div><div><span>Позиций в рекомендациях</span><strong id="item-count">—</strong></div><div><span><i class="dot"></i> Критичных позиций</span><strong id="critical-count">—</strong></div><div><span>Подтверждено позиций</span><strong id="approved-count">0</strong></div></section>
+<section class="upload" id="dropzone" aria-label="Загрузка исходных данных"><div><strong>Исходные данные</strong><p>Перетащите CSV-файлы сюда или выберите их кнопкой.<br>Демо: файлы проверяются, рекомендации загружаются из моков. Расчёт не выполняется.</p><div id="files"></div></div><label class="button secondary">Выбрать CSV<input id="file-input" type="file" accept=".csv,text/csv" multiple></label></section>
+<div id="status" role="status" aria-live="polite">Загружаем рекомендации…</div><button id="retry" class="secondary" hidden>Повторить загрузку</button>
+<section class="workspace" aria-label="Рекомендации"><div class="toolbar"><label class="search">Поиск товара<input type="search" id="search" placeholder="Название или артикул"></label><label>Поставщик<select id="supplier"><option value="">Все поставщики</option></select></label><label>Срочность<select id="urgency"><option value="">Любая срочность</option><option value="critical">Критично</option><option value="soon">Скоро</option><option value="planned">Планово</option></select></label><button id="reset" class="secondary">Сбросить</button></div><div class="results-bar"><span id="results">Загрузка…</span><label class="check-label"><input type="checkbox" id="approved-only"> Только подтверждённые</label></div><div id="groups"></div></section>
+<footer>Рекомендации помогают принять решение. Заказы поставщикам автоматически не отправляются.<br>Подтверждения хранятся только до обновления страницы.</footer>
+</main><script type="module" src="dashboard.mjs"></script></body></html>
