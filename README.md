@@ -42,40 +42,38 @@
 
 ## 2. Current status
 
-В репозитории уже есть:
+**MVP полностью рабочий end-to-end**, проверено на настоящих файлах партнёра (не на моках):
 
-- dashboard;
-- FastAPI backend;
-- расчётное ядро;
-- SQLite-кэш загруженных фрагментов;
-- .NET extractor;
-- backend и frontend tests.
-
-Полный end-to-end с реальными Excel-файлами **ещё не завершён**: backend ожидает от extractor canonical fragment вида `supplier + file_type + items`, а текущий `/extract` пока возвращает preview Excel-таблицы в Markdown.
+- все 6 файлов IEK + все 6 файлов SystemElectric загружены одним запросом → **0 ошибок**, 3181 SKU по IEK и 724 SKU по SystemElectric;
+- extractor реально парсит CSV (cp1251, `;`), а не отдаёт preview;
+- ответ backend проходит собственную валидацию dashboard (`validateData`) без ошибок;
+- повторная частичная загрузка (например, только обновлённый "Товар в пути") не стирает ранее загруженных поставщиков — backend хранит фрагменты в SQLite и на каждый запрос пересчитывает и возвращает всех известных поставщиков.
 
 | Компонент | Статус |
 |---|---|
 | Dashboard | **Implemented** |
 | `POST /api/upload` | **Implemented** |
 | FastAPI backend | **Implemented** |
-| SQLite cache | **Implemented** |
+| SQLite cache (переживает рестарт backend'а) | **Implemented** |
 | Расчёт по SKU | **Implemented** |
 | Сезонность | **Implemented** |
 | Stockout compensation | **Implemented** |
 | Учёт текущего остатка | **Implemented** |
-| Учёт товара в пути | **Implemented** |
+| Учёт товара в пути с датами поставок | **Implemented** |
+| Дефицит по датам (запас закончится / поставка придёт) | **Implemented** |
 | Базовое исключение крупных выбросов | **Implemented** |
+| Влияние категории на расчёт | **Implemented** |
 | Supplier grouping | **Implemented** |
 | Explanation | **Implemented** |
 | Urgency | **Implemented** |
 | CSV export | **Implemented** |
 | Human approval в UI | **Implemented** |
-| Excel extractor | **In progress** |
-| End-to-end реальные файлы → рекомендации | **In progress** |
-| Customer-level anomaly по `customer_id` | **Not implemented** |
-| Устойчивый trend / growth | **Not implemented** |
+| CSV extractor (IEK + SystemElectric) | **Implemented** |
+| End-to-end реальные файлы → рекомендации | **Implemented, verified** |
+| Customer-level anomaly по `customer_id` | **Not implemented** (в данных партнёра нет обезличенного ID клиента) |
+| Устойчивый trend / growth (отдельно от сезонности) | **Not implemented** |
 | Отдельный forecast growth input | **Not implemented** |
-| Supplier-specific lead time | **Not implemented** |
+| Supplier-specific lead time | **Not implemented** (фиксировано 30 дней) |
 | Интеграция с 1С | **Not implemented** |
 | Автоматическая отправка поставщику | **Not implemented by design** |
 
@@ -83,22 +81,22 @@
 
 ## 3. Архитектура
 
-Целевой поток:
+Рабочий поток (проверен end-to-end на реальных файлах):
 
 ```text
 Dashboard
    │
-   │ POST /api/upload
+   │ POST /api/upload (несколько файлов, multipart)
    ▼
 FastAPI backend
    │
-   ├─ файл → extractor /extract
-   ├─ canonical fragment → SQLite cache
-   ├─ сборка данных по поставщику
-   └─ process_supplier(...)
+   ├─ каждый файл отдельным запросом → extractor /extract
+   ├─ canonical fragment {supplier, file_type, items} → SQLite (upsert по поставщик+тип файла)
+   ├─ сборка полного набора по КАЖДОМУ известному поставщику из накопленных фрагментов
+   └─ process_supplier(...) по каждому
             │
             ▼
-       JSON recommendations
+       JSON recommendations (все поставщики, не только из этого запроса)
             │
             ▼
 Dashboard
@@ -122,6 +120,10 @@ transit
 moq
 ```
 
+Файлы `Сезонность` и `Ежемесячные продажи в количественном выражении` extractor распознаёт и принимает (не выдаёт ошибку), но их содержимое не используется в расчёте — сезонность и агрегаты считаются внутри `process_supplier` из сырой истории продаж.
+
+Каждый запрос к `/api/upload` пересчитывает и возвращает **всех** поставщиков, известных backend'у, а не только тех, чьи файлы пришли в этом запросе — иначе частичная догрузка одного поставщика убирала бы остальных из ответа и, соответственно, с экрана.
+
 ---
 
 ## 4. API
@@ -137,11 +139,11 @@ files: File[]
 
 Backend:
 
-1. отправляет каждый файл в extractor;
-2. сохраняет canonical fragments в SQLite;
-3. собирает данные по затронутым поставщикам;
-4. запускает `process_supplier(...)`;
-5. возвращает готовый JSON.
+1. отправляет каждый файл в extractor **отдельным** запросом (по одному файлу за раз);
+2. сохраняет canonical fragments в SQLite (upsert по `supplier + file_type`, старая версия этого типа файла для поставщика полностью заменяется);
+3. собирает полные данные по **всем** известным поставщикам из накопленных фрагментов;
+4. запускает `process_supplier(...)` по каждому;
+5. возвращает готовый JSON, включая поставщиков, не затронутых этим конкретным запросом.
 
 Ожидаемый ответ:
 
@@ -280,7 +282,26 @@ safety_stock_days = 7 × (1 + average category CV)
 5 ≤ safety_stock_days ≤ 21
 ```
 
-### 5.7. Рекомендуемое количество
+### 5.7. Товар в пути: даты поставок, а не одно число
+
+Вход — не одно число "сколько в пути", а список поставок с датой прибытия:
+
+```text
+incoming_shipments: [{ qty, expected_date }, ...]
+```
+
+Для IEK дата извлекается прямо из заголовка колонки файла "Товар в пути" (например, "поступление до 10.10.2026"). Для SystemElectric, где файл не содержит дат прихода, вся партия считается пришедшей "завтра" — это единственное текущее упрощение для этого поставщика.
+
+В расчёт объёма заказа засчитывается только то, что придёт **в пределах горизонта поставки** (`lead_time_days`):
+
+```text
+qty_arriving_in_lead_time =
+sum(qty for shipments where today <= expected_date <= today + lead_time_days)
+```
+
+Поставки, которые придут позже этого окна, в объём заказа не засчитываются — они не помогут закрыть ближайшую потребность.
+
+### 5.8. Рекомендуемое количество
 
 Текущий default lead time:
 
@@ -303,7 +324,7 @@ raw_need =
 demand_for_lead_time
 + safety_stock
 - current_stock
-- in_transit_qty
+- qty_arriving_in_lead_time
 
 recommended_qty =
 max(0, raw_need)
@@ -311,9 +332,19 @@ max(0, raw_need)
 
 Если задан `MOQ`, заказ округляется вверх до кратности MOQ.
 
-### 5.8. Срочность
+### 5.9. Дефицит по датам
 
-По дням покрытия текущим остатком:
+Отдельно от объёма заказа считается **дата исчерпания запаса** — симуляция дня за днём: текущий остаток тратится по `daily_forecast`, а каждая известная поставка пополняет его на свою дату. Если очередная поставка приходит позже, чем закончится запас — это дефицит, `reason` явно называет обе даты:
+
+```text
+"запаса хватит до 2026-10-05, ближайшая поставка ожидается 2026-10-15 - вероятен дефицит на 10 дн."
+```
+
+Если дефицита нет — обоснование говорит, до какой даты хватит запаса с учётом поставок. Именно эта дата (не плоское число дней) используется для определения срочности.
+
+### 5.10. Срочность
+
+По дням до расчётной даты исчерпания запаса (см. 5.9):
 
 ```text
 < 7 дней   → critical
@@ -531,7 +562,7 @@ UPLOADS_DB_PATH
 
 В `docker-compose.yml` они задаются для backend автоматически.
 
-`OPENAI_API_KEY` используется OpenAI-клиентом extractor для field mapping. Текущий `/extract` пока не использует финальный mapping pipeline.
+`OPENAI_API_KEY` не требуется для текущей работы `/extract` — парсинг детерминированный (без LLM), переменная оставлена в `.env.example` как задел на будущее и может быть пустой/любой.
 
 Секреты не должны попадать в Git.
 
@@ -548,7 +579,7 @@ PYTHONPATH=src pytest -q
 Проверено на текущем архиве:
 
 ```text
-13 passed
+15 passed
 ```
 
 ### Dashboard
@@ -584,12 +615,16 @@ Backend-тесты покрывают:
 - сезонность;
 - stockout compensation;
 - устойчивость к крупной разовой продаже;
-- влияние `in_transit`;
+- влияние `in_transit`/дат поставок;
 - влияние категории;
 - explanation;
 - urgency;
 - API contracts;
-- SQLite cache.
+- SQLite cache и частичные обновления;
+- возврат всех известных поставщиков на каждый запрос;
+- деградацию при недоступном/некорректно отвечающем extractor.
+
+Дополнительно вручную (не автоматизировано) проверено: все 12 реальных файлов IEK + SystemElectric за один запрос — 0 ошибок, 3181 + 724 SKU, ответ проходит `validateData` дашборда.
 
 ---
 
@@ -597,17 +632,18 @@ Backend-тесты покрывают:
 
 | Требование | Статус |
 |---|---|
-| Базовый расчёт по SKU | **Partial / mostly implemented** |
+| Базовый расчёт по SKU (все источники, изменение любого влияет на результат) | **Implemented** |
 | История продаж | **Implemented** |
 | Текущие остатки | **Implemented** |
-| Товары в пути | **Implemented** |
-| Категория товара | **Implemented** |
+| Товары в пути (с датами поставок) | **Implemented** |
+| Категория товара (влияет на safety stock) | **Implemented** |
 | Forecast growth input | **Not implemented** |
 | Сезонность | **Implemented** |
-| Устойчивый рост спроса | **Not implemented separately** |
+| Устойчивый рост спроса | **Not implemented separately** (учтён неявно через тренд последних 6 мес.) |
+| Дефицит по датам с учётом поставок | **Implemented** |
 | Stockout / lost demand | **Implemented** |
 | Крупные разовые заказы | **Implemented at transaction level** |
-| Крупная продажа одному клиенту | **Not implemented separately** |
+| Крупная продажа одному клиенту | **Not implemented separately** (в данных партнёра нет обезличенного ID клиента) |
 | Supplier grouping | **Implemented** |
 | Recommended quantity | **Implemented** |
 | Urgency | **Implemented** |
@@ -621,14 +657,15 @@ Backend-тесты покрывают:
 
 ## 14. Ограничения текущего MVP
 
-1. `extractor /extract` пока возвращает preview Excel-таблицы, а backend ожидает canonical fragment — поэтому real-file end-to-end ещё не завершён.
-2. Customer-level anomaly detection по обезличенному клиенту отсутствует.
-3. Отдельный устойчивый trend / growth отсутствует.
+1. Определение поставщика/типа файла — по имени файла (плюс резервная эвристика по содержимому для файла продаж IEK, где в имени файла нет бренда). Если партнёр когда-нибудь пришлёт файл с совсем другим именем — потребуется расширить эвристику.
+2. Customer-level anomaly detection по обезличенному клиенту отсутствует — в предоставленных данных партнёра нет поля с ID клиента.
+3. Отдельный устойчивый trend / growth отсутствует — учитывается неявно через тренд последних 6 месяцев.
 4. Внешний forecast growth не передаётся в расчёт.
-5. Lead time сейчас фиксирован значением `30` дней.
-6. Нет прямой интеграции с 1С.
-7. Approve — UI-состояние, а не размещение заказа у поставщика.
-8. OpenAI используется только в extractor field-mapping модуле; расчётное ядро детерминированное и LLM не требует.
+5. Lead time сейчас фиксирован значением `30` дней (не по поставщику).
+6. Для SystemElectric нет дат поставок в исходном файле "Товар в пути" — весь объём считается приходящим "завтра"; для IEK даты извлекаются из файла по-настоящему.
+7. Нет прямой интеграции с 1С.
+8. Approve — UI-состояние, а не размещение заказа у поставщика.
+9. Extractor не использует LLM — парсинг детерминированный (regex/CSV), `OPENAI_API_KEY` не задействован.
 
 ---
 
@@ -646,16 +683,17 @@ Backend-тесты покрывают:
 
 ## 16. Ближайшие TODO
 
-P0 до полного end-to-end:
+P0 (end-to-end на реальных файлах) — **выполнено**:
 
-- [ ] привести `/extract` к canonical fragment contract;
-- [ ] прогнать реальные файлы поставщиков через `/api/upload`;
-- [ ] выполнить полный smoke test:
+- [x] привести `/extract` к canonical fragment contract;
+- [x] прогнать реальные файлы поставщиков через `/api/upload`;
+- [x] выполнить полный smoke test:
   `upload → extract → cache → calculate → JSON → dashboard`.
 
-После P0:
+Дальше, по приоритету:
 
-- [ ] customer-level anomaly detection;
-- [ ] устойчивый trend / growth;
+- [ ] даты поставок для SystemElectric (сейчас только IEK даёт реальные даты из файла);
+- [ ] customer-level anomaly detection (нужен ID клиента от партнёра);
+- [ ] устойчивый trend / growth отдельно от сезонности;
 - [ ] forecast growth input;
 - [ ] supplier-specific lead time.
