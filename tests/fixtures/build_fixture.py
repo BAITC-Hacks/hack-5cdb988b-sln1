@@ -1,8 +1,3 @@
-"""Детерминированно строит tests/fixtures/mock_input.json — по одному SKU
-на каждый must-have проверяемый сценарий из ТЗ (без randomness, чтобы тесты были воспроизводимы).
-Запуск: python tests/fixtures/build_fixture.py
-"""
-
 import json
 from pathlib import Path
 
@@ -16,16 +11,13 @@ def month_to_day(month: str, day: int = 15) -> str:
 
 
 def make_seasonal_sku() -> dict:
-    """SKU-SEASON: чёткий летний пик (июнь-август x3), остальное — база 20/мес.
-    Проверка must-have #2: прогноз на летний месяц должен отражать пик, а не среднее по году.
-    """
     base = 20
     peak_months = {"06", "07", "08"}
     transactions = []
     for month in ALL_MONTHS:
         qty = base * 3 if month[5:7] in peak_months else base
         transactions.append({"date": month_to_day(month), "order_id": f"ORD-{month}", "qty": qty})
-    monthly_stock = {m: 500 for m in ALL_MONTHS}  # остатков всегда хватало, stockout нет
+    monthly_stock = {m: 500 for m in ALL_MONTHS}
     return {
         "sku": "SKU-SEASON",
         "name": "Товар с выраженной летней сезонностью",
@@ -38,17 +30,13 @@ def make_seasonal_sku() -> dict:
 
 
 def make_stockout_sku() -> dict:
-    """SKU-STOCKOUT: стабильные продажи 30/мес, но в июле-августе 2025 остаток = 0
-    (значит и продажи в эти месяцы искусственно занижены до 0 - censored demand).
-    Проверка must-have #3: скорректированная потребность выше, чем расчёт по сырым продажам.
-    """
     stockout_months = {"2025-07", "2025-08"}
     transactions = []
     monthly_stock = {}
     for month in ALL_MONTHS:
         stock = 0 if month in stockout_months else 200
         monthly_stock[month] = stock
-        qty = 0 if month in stockout_months else 30  # в stockout физически продать не могли
+        qty = 0 if month in stockout_months else 30
         if qty > 0:
             transactions.append({"date": month_to_day(month), "order_id": f"ORD-{month}", "qty": qty})
     return {
@@ -63,10 +51,6 @@ def make_stockout_sku() -> dict:
 
 
 def make_outlier_sku() -> dict:
-    """SKU-OUTLIER: обычные продажи ~15/мес мелкими заказами, но в марте 2025
-    один клиент разово купил 900 шт. Проверка must-have #4: этот разовый заказ
-    не должен существенно поднимать рекомендуемое регулярное количество.
-    """
     transactions = []
     for month in ALL_MONTHS:
         transactions.append({"date": month_to_day(month, 5), "order_id": f"ORD-{month}-A", "qty": 8})
@@ -85,9 +69,6 @@ def make_outlier_sku() -> dict:
 
 
 def make_transit_sensitivity_sku() -> dict:
-    """SKU-TRANSIT: стабильные продажи, остаток низкий. Используется дважды в тесте
-    (с in_transit_qty=0 и in_transit_qty=1000) чтобы доказать must-have #1:
-    изменение товара в пути отражается на итоговой рекомендации."""
     transactions = [
         {"date": month_to_day(m), "order_id": f"ORD-{m}", "qty": 25} for m in ALL_MONTHS
     ]

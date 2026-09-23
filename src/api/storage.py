@@ -1,17 +1,3 @@
-"""Хранилище последних загруженных фрагментов данных по (поставщик, тип файла, артикул).
-
-Зачем это нужно: юзер грузит файлы не все сразу и не всегда полный набор - сегодня
-обновился только "товар в пути" для IEK, через неделю - только "остатки". Каждая
-новая загрузка файла определённого типа ПОЛНОСТЬЮ заменяет то, что было известно
-по этому типу файла для этого поставщика (не мерджит построчно) - партнёр присылает
-актуальный срез, а не дельту. Данные о продажах/остатках/MOQ по другим типам файлов
-при этом не трогаются и переживают рестарт backend'а (обычный словарь в памяти - нет).
-
-"Какие данные уже были, какие новые" не требует отдельной логики: INSERT OR REPLACE
-по первичному ключу (supplier, file_type, sku) сам решает - есть строка - обновится,
-нет - создастся.
-"""
-
 from __future__ import annotations
 
 import json
@@ -48,9 +34,6 @@ def _connect() -> Iterator[sqlite3.Connection]:
 
 
 def upsert_fragment(supplier: str, file_type: str, items: dict[str, dict[str, Any]]) -> None:
-    """Заменяет все известные по этому (supplier, file_type) артикулы на items.
-    Артикулы, которых в новой загрузке нет, но которые были раньше по ЭТОМУ типу
-    файла, удаляются - партнёр присылает актуальный срез, а не дельту."""
     now = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
         conn.execute(
@@ -64,8 +47,6 @@ def upsert_fragment(supplier: str, file_type: str, items: dict[str, dict[str, An
 
 
 def get_supplier_fragments(supplier: str) -> dict[str, dict[str, dict[str, Any]]]:
-    """{"sales": {sku: {...}}, "stock": {...}, ...} - последнее известное состояние
-    по каждому типу файла для этого поставщика, из чего бы оно ни было собрано."""
     with _connect() as conn:
         rows = conn.execute(
             "SELECT file_type, sku, fields FROM file_fragments WHERE supplier = ?",

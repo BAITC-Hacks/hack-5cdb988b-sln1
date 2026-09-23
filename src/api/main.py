@@ -1,25 +1,3 @@
-"""Backend-эндпоинт: принимает данные, вызывает расчётное ядро, отдаёт Контракт 2/3.
-
-Два пути в систему:
-  POST /api/recalculate — принимает уже готовый Контракт 1 (JSON), сразу считает.
-                          Нужен для разработки/демо, пока парсер файлов не готов.
-  POST /api/upload       — принимает один или несколько файлов поставщика. Каждый файл
-                          отправляется ОТДЕЛЬНО в сервис экстрактора (Человек 1,
-                          .NET, EXTRACTOR_URL) - его текущий /extract и так рассчитан
-                          на один файл за раз, менять это не нужно.
-
-Зачем нужно хранилище последних файлов по поставщику: юзер не обязан каждый раз
-заново грузить все файлы разом. Если сегодня обновился только "Товар в пути" для
-IEK, юзер загружает только его - а данные о продажах/остатках/MOQ берутся из того,
-что было загружено последний раз (см. storage.py, SQLite - переживает рестарт
-backend'а). Без этого любой частичный апдейт стирал бы всё остальное, и юзера
-пришлось бы заставлять каждый раз грузить 25-мегабайтную историю продаж заново
-ради одного файла с товаром в пути.
-
-Парсинга/классификации самого содержимого файлов здесь нет и не будет - это зона
-сервиса экстрактора, а не этого backend'а.
-"""
-
 from __future__ import annotations
 
 import os
@@ -43,7 +21,7 @@ app = FastAPI(title="ekt.kz procurement recommendations API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # для хакатон-демо; на проде сузить до домена дашборда
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -61,7 +39,6 @@ class RecalculateRequest(BaseModel):
 
 @app.post("/api/recalculate")
 def recalculate(payload: RecalculateRequest) -> dict[str, Any]:
-    """Вход — Контракт 1 (по одному или нескольким поставщикам), выход — Контракт 2/3."""
     results = [process_supplier(supplier.model_dump()) for supplier in payload.suppliers]
     for supplier_result in results:
         for item in supplier_result["items"]:
@@ -73,10 +50,6 @@ def recalculate(payload: RecalculateRequest) -> dict[str, Any]:
 
 
 async def call_extractor(file: UploadFile) -> dict[str, Any]:
-    """Отправляет ОДИН файл в сервис экстрактора. Ожидаемый ответ:
-    {"supplier": "IEK", "file_type": "sales"|"stock"|"transit"|"moq",
-     "items": {"<sku>": {...поля этого типа файла...}}}
-    или {"error": "..."}, если файл не удалось классифицировать/распарсить."""
     content = await file.read()
     async with httpx.AsyncClient(timeout=60.0) as client:
         response = await client.post(
@@ -88,8 +61,6 @@ async def call_extractor(file: UploadFile) -> dict[str, Any]:
 
 
 def _build_contract1_from_storage(supplier: str) -> dict[str, Any] | None:
-    """None, если после мерджа со всей историей загрузок всё ещё не хватает
-    обязательного типа файла - вызывающий код превращает это в явную ошибку."""
     supplier_cache = storage.get_supplier_fragments(supplier)
     if not REQUIRED_FILE_TYPES.issubset(supplier_cache.keys()):
         return None
@@ -115,10 +86,6 @@ def _build_contract1_from_storage(supplier: str) -> dict[str, Any] | None:
 
 @app.post("/api/upload")
 async def upload(files: list[UploadFile]) -> dict[str, Any]:
-    """Принимает один или несколько файлов, каждый уходит в экстрактор отдельным
-    запросом. Результат мерджится в кэш по (поставщик, тип файла), пересчёт идёт
-    по всем поставщикам, которых затронула эта загрузка - с учётом того, что было
-    загружено раньше, а не только того, что пришло сейчас."""
     affected_suppliers: set[str] = set()
     upload_errors = []
 
@@ -132,7 +99,7 @@ async def upload(files: list[UploadFile]) -> dict[str, Any]:
             ) from exc
 
         if "error" in fragment:
-            upload_errors.append({"file": file.filename, "error": fragment["error"]})
+            upload_errors.append({"supplier": fragment.get("supplier") or file.filename, "error": fragment["error"]})
             continue
 
         storage.upsert_fragment(fragment["supplier"], fragment["file_type"], fragment["items"])
@@ -164,11 +131,6 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-# Дашборд (Человек 3) вызывает fetch('/api/upload') - относительным путём, то есть
-# ждёт, что и UI, и API отдаются с одного origin. Поэтому раздаём статику дашборда
-# отсюда же, а не отдельным контейнером на другом порту - иначе относительный fetch
-# бьётся в порт самого дашборда и никогда не долетает до backend'а.
-# Регистрируется ПОСЛЕДНИМ: конкретные /api/* маршруты выше должны matchиться раньше.
 _DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "dashboard")
 if os.path.isdir(_DASHBOARD_DIR):
     app.mount("/", StaticFiles(directory=_DASHBOARD_DIR, html=True), name="dashboard")

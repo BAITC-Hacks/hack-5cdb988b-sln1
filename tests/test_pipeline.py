@@ -1,6 +1,3 @@
-"""Тесты калькуляционного ядра — по одному на каждую "проверку" из must-have ТЗ
-(Кейс: Автоматизация формирования заказов поставщикам, ekt.kz)."""
-
 import copy
 import json
 from pathlib import Path
@@ -26,8 +23,6 @@ def _item(fixture_data, sku: str) -> dict:
     raise KeyError(sku)
 
 
-# --- Must-have 2: сезонность отражается в прогнозе, а не просто среднее по истории ---
-
 def test_seasonality_reflects_peak_not_flat_average(fixture_data):
     item = _item(fixture_data, "SKU-SEASON")
     result = process_item(item)
@@ -42,14 +37,10 @@ def test_seasonality_reflects_peak_not_flat_average(fixture_data):
     forecast_offpeak = forecast_month(monthly_sales, seasonality_index, target_month="2026-01")
     flat_average = sum(monthly_sales.values()) / len(monthly_sales)
 
-    # прогноз на пиковый месяц должен быть заметно выше прогноза на непиковый
     assert forecast_peak > forecast_offpeak * 1.3
-    # и не должен схлопываться к простому среднему по всей истории
     assert forecast_peak > flat_average * 1.2
     assert result["_debug"]["seasonality_index"]["07"] > 1.0
 
-
-# --- Must-have 3: компенсация упущенного спроса в stockout-периоды ---
 
 def test_stockout_increases_estimated_need_vs_raw_sales(fixture_data):
     item = _item(fixture_data, "SKU-STOCKOUT")
@@ -60,12 +51,8 @@ def test_stockout_increases_estimated_need_vs_raw_sales(fixture_data):
 
     assert "2025-07" in result["_debug"]["stockout_months"]
     assert "2025-08" in result["_debug"]["stockout_months"]
-    # расчёт по скорректированным данным должен давать более высокую потребность,
-    # чем расчёт по "сырым" фактическим продажам (которые занижены нулями в stockout)
     assert adjusted > raw
 
-
-# --- Must-have 4: разовый крупный заказ не должен раздувать регулярную потребность ---
 
 def test_one_off_bulk_order_excluded_from_regular_demand(fixture_data):
     item_with_outlier = _item(fixture_data, "SKU-OUTLIER")
@@ -82,12 +69,8 @@ def test_one_off_bulk_order_excluded_from_regular_demand(fixture_data):
     forecast_with = result_with_outlier["_debug"]["monthly_forecast_adjusted"]
     forecast_without = result_without_outlier["_debug"]["monthly_forecast_adjusted"]
 
-    # прогноз с разовым заказом в исходных данных не должен существенно отличаться
-    # от прогноза без него - т.к. выброс должен быть отсечён на этапе очистки
     assert forecast_with == pytest.approx(forecast_without, rel=0.05)
 
-
-# --- Must-have 1: изменение товара в пути отражается на итоговом результате ---
 
 def test_recommendation_sensitive_to_in_transit_qty(fixture_data):
     item_no_transit = _item(fixture_data, "SKU-TRANSIT")
@@ -99,10 +82,8 @@ def test_recommendation_sensitive_to_in_transit_qty(fixture_data):
     result_with_transit = process_item(item_with_transit)
 
     assert result_with_transit["recommended_qty"] < result_no_transit["recommended_qty"]
-    assert result_with_transit["recommended_qty"] == 0  # 1000 уже с лихвой покрывает спрос
+    assert result_with_transit["recommended_qty"] == 0
 
-
-# --- Must-have 1: категория товара реально влияет на расчёт, а не только на дисплей ---
 
 def _flat_item(sku: str, category: str, qty: float = 25) -> dict:
     months = [f"2025-{m:02d}" for m in range(1, 13)]
@@ -168,12 +149,8 @@ def test_category_volatility_changes_recommended_qty():
     stable_qty = next(i for i in stable_result["items"] if i["sku"] == "SKU-CATEGORY-TEST")["recommended_qty"]
     volatile_qty = next(i for i in volatile_result["items"] if i["sku"] == "SKU-CATEGORY-TEST")["recommended_qty"]
 
-    # один и тот же товар, разная категория соседей по волатильности спроса ->
-    # разный страховой запас -> разная рекомендация. Категория реально влияет на расчёт.
     assert volatile_qty > stable_qty
 
-
-# --- Must-have 5: каждая строка сопровождается обоснованием ---
 
 def test_every_item_has_non_empty_reason_and_valid_urgency(fixture_data):
     for item in fixture_data["items"]:

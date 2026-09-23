@@ -16,24 +16,14 @@ FIXTURE_PATH = Path(__file__).parent / "fixtures" / "mock_input.json"
 
 @pytest.fixture(autouse=True)
 def isolated_storage(tmp_path, monkeypatch):
-    """Каждый тест получает свою SQLite-базу во временной папке - тесты не видят
-    данные друг друга и не оставляют файлы после себя."""
     monkeypatch.setattr(api_storage, "DB_PATH", str(tmp_path / "uploads.db"))
     yield
 
 
-_REAL_ASYNC_CLIENT = httpx.AsyncClient  # ссылка на настоящий класс до любых подмен ниже
+_REAL_ASYNC_CLIENT = httpx.AsyncClient
 
 
 def _patch_extractor(monkeypatch, responses: list[dict]):
-    """Подменяет транспорт httpx так, будто экстрактор ответил по очереди этими
-    JSON-ответами - по одному на каждый файл, в порядке вызова.
-
-    Наследуемся от _REAL_ASYNC_CLIENT (а не от текущего httpx.AsyncClient) специально:
-    если вызвать этот хелпер дважды в одном тесте, второй Fake-класс не должен
-    случайно унаследоваться от первого (уже подменённого) - иначе транспорт первого
-    вызова "просачивается" во второй и его очередь ответов ломается.
-    """
     queue = iter(responses)
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -78,7 +68,6 @@ def test_recalculate_returns_valid_contract():
 
 
 def test_upload_returns_502_when_extractor_unreachable():
-    # EXTRACTOR_URL по умолчанию указывает на localhost:8080, где в тестах никто не слушает
     response = client.post("/api/upload", files={"files": ("test.csv", b"a;b;c\n1;2;3", "text/csv")})
     assert response.status_code == 502
 
@@ -127,8 +116,6 @@ def test_upload_reports_missing_required_file_types(monkeypatch):
 
 
 def test_upload_partial_update_reuses_previously_cached_files(monkeypatch):
-    """Юзер сначала грузит полный набор, потом - только обновлённый 'товар в пути'.
-    Второй запрос не должен требовать заново продажи/остатки - берём их из кэша."""
     _patch_extractor(monkeypatch, [
         {"supplier": "PARTSUP", "file_type": "sales", "items": {
             "SKUX": {"name": "Товар X", "transactions": [
@@ -149,9 +136,8 @@ def test_upload_partial_update_reuses_previously_cached_files(monkeypatch):
         ],
     )
     first_qty = first.json()["suppliers"][0]["items"][0]["recommended_qty"]
-    assert first_qty > 0  # остатка мало, спрос стабильный -> должны рекомендовать заказ
+    assert first_qty > 0
 
-    # второй запрос - только обновлённый файл "товар в пути", без продаж и остатков
     _patch_extractor(monkeypatch, [
         {"supplier": "PARTSUP", "file_type": "transit", "items": {"SKUX": {"in_transit_qty": 1000}}},
     ])
@@ -159,9 +145,9 @@ def test_upload_partial_update_reuses_previously_cached_files(monkeypatch):
 
     assert second.status_code == 200
     body = second.json()
-    assert body["errors"] == []  # продажи/остатки не пропали - взялись из кэша
+    assert body["errors"] == []
     second_qty = body["suppliers"][0]["items"][0]["recommended_qty"]
-    assert second_qty == 0  # товара в пути теперь с избытком, заказ больше не нужен
+    assert second_qty == 0
 
 
 def test_upload_surfaces_per_file_errors_from_extractor(monkeypatch):
@@ -172,4 +158,4 @@ def test_upload_surfaces_per_file_errors_from_extractor(monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["suppliers"] == []
-    assert body["errors"] == [{"file": "непонятный_файл.csv", "error": "не удалось определить поставщика по имени файла"}]
+    assert body["errors"] == [{"supplier": "непонятный_файл.csv", "error": "не удалось определить поставщика по имени файла"}]
