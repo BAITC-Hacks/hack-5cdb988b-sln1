@@ -29,6 +29,7 @@ from typing import Any
 import httpx
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from calc_engine.pipeline import process_supplier
@@ -161,3 +162,13 @@ async def upload(files: list[UploadFile]) -> dict[str, Any]:
 @app.get("/api/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
+
+
+# Дашборд (Человек 3) вызывает fetch('/api/upload') - относительным путём, то есть
+# ждёт, что и UI, и API отдаются с одного origin. Поэтому раздаём статику дашборда
+# отсюда же, а не отдельным контейнером на другом порту - иначе относительный fetch
+# бьётся в порт самого дашборда и никогда не долетает до backend'а.
+# Регистрируется ПОСЛЕДНИМ: конкретные /api/* маршруты выше должны matchиться раньше.
+_DASHBOARD_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "dashboard")
+if os.path.isdir(_DASHBOARD_DIR):
+    app.mount("/", StaticFiles(directory=_DASHBOARD_DIR, html=True), name="dashboard")

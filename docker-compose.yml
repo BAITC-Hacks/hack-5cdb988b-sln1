@@ -21,17 +21,9 @@ services:
       - extractor
     ports:
       - "8001:8001"
-
-  dashboard:
-    image: python:3.11-slim
-    working_dir: /dashboard
-    volumes:
-      - ./dashboard:/dashboard
-    command: python3 -m http.server 8000 --bind 0.0.0.0
-    ports:
-      - "8000:8000"
-    depends_on:
-      - backend
+    # backend отдаёт и API (/api/*), и статику дашборда (всё остальное) с одного
+    # порта - так относительный fetch('/api/upload') на фронте всегда попадает
+    # в тот же origin, откуда была загружена страница. Открывать: http://localhost:8001/
 
 volumes:
   backend_data:
