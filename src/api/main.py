@@ -57,7 +57,29 @@ async def call_extractor(file: UploadFile) -> dict[str, Any]:
             files={"file": (file.filename, content, file.content_type)},
         )
     response.raise_for_status()
-    return response.json()
+
+    try:
+        fragment = response.json()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Экстрактор вернул не-JSON ответ для '{file.filename}': {response.text[:200]!r}",
+        ) from exc
+
+    if not isinstance(fragment, dict):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Экстрактор вернул не объект для '{file.filename}': {fragment!r}",
+        )
+    if "error" not in fragment and not {"supplier", "file_type", "items"}.issubset(fragment.keys()):
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Экстрактор вернул неожиданный формат для '{file.filename}': "
+                f"ожидались поля supplier/file_type/items или error, получено {sorted(fragment.keys())}"
+            ),
+        )
+    return fragment
 
 
 def _build_contract1_from_storage(supplier: str) -> dict[str, Any] | None:

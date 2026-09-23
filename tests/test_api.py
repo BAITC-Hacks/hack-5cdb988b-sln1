@@ -150,6 +150,15 @@ def test_upload_partial_update_reuses_previously_cached_files(monkeypatch):
     assert second_qty == 0
 
 
+def test_upload_returns_502_when_extractor_response_has_unexpected_shape(monkeypatch):
+    _patch_extractor(monkeypatch, [{"generated_at": "2026-09-23", "suppliers": []}])
+
+    response = client.post("/api/upload", files={"files": ("sales.csv", b"data", "text/csv")})
+
+    assert response.status_code == 502
+    assert "неожиданный формат" in response.json()["detail"]
+
+
 def test_upload_surfaces_per_file_errors_from_extractor(monkeypatch):
     _patch_extractor(monkeypatch, [{"error": "не удалось определить поставщика по имени файла"}])
 

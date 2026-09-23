@@ -1,4 +1,7 @@
+using System.Text;
 using Extractor.Services.Extract;
+
+Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -44,13 +47,10 @@ app.MapPost("/extract", async Task<IResult> (
                 return Results.BadRequest(new { error = "File is empty." });
             }
 
-            await using var stream = file.OpenReadStream();
-
             try {
-                var result = await excelMarkdownService.ReadFirstRowsAsMarkdownAsync(stream, rowLimit: 15, cancellationToken);
-
-
-                // var result = await extractorService.ExtractAsync(stream, cancellationToken);
+                using var memoryStream = new MemoryStream();
+                await file.CopyToAsync(memoryStream, cancellationToken);
+                var result = RealCsvExtractor.Extract(memoryStream.ToArray(), file.FileName);
                 return Results.Ok(result);
             }
             catch (InvalidDataException exception) {
