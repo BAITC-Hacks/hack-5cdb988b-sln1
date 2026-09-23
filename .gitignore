@@ -10,4 +10,6 @@ venv/
 Thumbs.db
 .idea/
 .vscode/
-/.vs
+**/.vs
+**/bin/
+**/obj/

@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Extractor.AppHost/Extractor.AppHost.csproj" />
+  <Project Path="Extractor.ServiceDefaults/Extractor.ServiceDefaults.csproj" />
+  <Project Path="Extractor/Extractor.csproj" />
+</Solution>

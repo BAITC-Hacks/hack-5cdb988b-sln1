@@ -1,0 +1,14 @@
+@Extractor_HostAddress = http://localhost:5156
+
+POST {{Extractor_HostAddress}}/extract
+Accept: application/json
+Content-Type: multipart/form-data; boundary=excel-boundary
+
+--excel-boundary
+Content-Disposition: form-data; name="file"; filename="input.xlsx"
+Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+
+< ./input.xlsx
+--excel-boundary--
+
+###
