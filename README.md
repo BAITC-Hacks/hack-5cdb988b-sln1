@@ -5,28 +5,28 @@
 **Владелец задачи:** ТОО «Электрокомплект»  
 **Основной пользователь:** менеджер отдела закупа
 
-Решение предназначено для автоматизации расчёта пополнения склада: пользователь загружает исходные файлы, система рассчитывает рекомендации по поставщикам, показывает рекомендуемое количество, срочность и объяснение, после чего менеджер проверяет и подтверждает результат.
+Решение автоматизирует подготовку рекомендаций по пополнению склада: пользователь загружает исходные файлы, система рассчитывает рекомендуемые количества по поставщикам, показывает срочность и объяснение, после чего менеджер проверяет и подтверждает результат.
 
 > Заказы поставщикам автоматически не отправляются. Финальное решение остаётся за ответственным сотрудником.
 
 ---
 
-## 1. Цель решения
+## 1. Что должно решать решение
 
-По официальному ТЗ система должна формировать рекомендуемые заказы по каждому артикулу с учётом:
+По официальному ТЗ расчёт должен учитывать:
 
-- истории продаж;
-- текущих остатков;
-- товаров в пути;
-- категорий товаров;
-- сезонности;
-- устойчивого роста спроса;
-- прогноза прироста;
-- упущенного спроса в периоды stockout;
-- разовых крупных заказов и выбросов;
-- поставщика и сроков поставки.
+- историю продаж;
+- текущие остатки;
+- товары в пути;
+- категории товаров;
+- сезонность;
+- устойчивый рост спроса;
+- прогноз прироста;
+- упущенный спрос в периоды stockout;
+- разовые крупные заказы и выбросы;
+- поставщиков и сроки поставки.
 
-Целевой пользовательский сценарий:
+Целевой сценарий:
 
 ```text
 загрузка файлов
@@ -42,66 +42,73 @@
 
 ## 2. Current status
 
-В текущем репозитории уже реализованы dashboard, FastAPI backend, расчётное ядро, SQLite-кэш загруженных фрагментов и тесты.
+В репозитории уже есть:
 
-Полный end-to-end сценарий с реальными файлами пока не завершён: backend ожидает от extractor нормализованный fragment вида `supplier + file_type + items`, а текущий `/extract` в .NET extractor пока возвращает preview Excel-таблицы.
+- dashboard;
+- FastAPI backend;
+- расчётное ядро;
+- SQLite-кэш загруженных фрагментов;
+- .NET extractor;
+- backend и frontend tests.
 
-| Компонент | Статус | Текущее состояние |
-|---|---|---|
-| Dashboard | **Implemented** | Загрузка файлов, loading/error states, фильтры, группировка, approve, CSV export |
-| Dashboard → `POST /api/upload` | **Implemented** | Один синхронный multipart-запрос |
-| FastAPI backend | **Implemented** | `/api/upload`, `/api/recalculate`, `/api/health` |
-| SQLite cache | **Implemented** | Последние фрагменты по `(supplier, file_type, sku)` |
-| Расчёт по SKU | **Implemented** | Forecast, остаток, in-transit, safety stock, MOQ, urgency |
-| Сезонность | **Implemented** | Коэффициенты по календарным месяцам |
-| Stockout compensation | **Implemented** | Коррекция месяцев с `stock <= 0` |
-| Базовое исключение крупных выбросов | **Implemented** | Robust rule на уровне транзакций |
-| Explanation | **Implemented** | Текстовое обоснование по каждой позиции |
-| Supplier grouping | **Implemented** | Результат группируется по поставщикам |
-| Excel extractor | **In progress** | Excel читается, но canonical fragment ещё не возвращается из `/extract` |
-| OpenAI field mapping | **In progress** | Клиент реализован, но основной `/extract` сейчас его не использует |
-| End-to-end upload реальных файлов | **In progress** | Нужен финальный контракт extractor → backend |
-| Customer-level anomaly | **Not implemented** | Нет отдельного анализа по обезличенному `customer_id` |
-| Устойчивый trend / growth | **Not implemented** | Forecast основан на recent baseline + seasonality |
-| Отдельный forecast growth input | **Not implemented** | Не передаётся в расчётный контракт |
-| Supplier-specific lead time | **Not implemented** | Сейчас используется default `30` дней |
-| Интеграция с 1С | **Not implemented** | Прямой интеграции нет |
-| Автоотправка поставщику | **Not implemented by design** | Запрещена без подтверждения человека |
+Полный end-to-end с реальными Excel-файлами **ещё не завершён**: backend ожидает от extractor canonical fragment вида `supplier + file_type + items`, а текущий `/extract` пока возвращает preview Excel-таблицы в Markdown.
+
+| Компонент | Статус |
+|---|---|
+| Dashboard | **Implemented** |
+| `POST /api/upload` | **Implemented** |
+| FastAPI backend | **Implemented** |
+| SQLite cache | **Implemented** |
+| Расчёт по SKU | **Implemented** |
+| Сезонность | **Implemented** |
+| Stockout compensation | **Implemented** |
+| Учёт текущего остатка | **Implemented** |
+| Учёт товара в пути | **Implemented** |
+| Базовое исключение крупных выбросов | **Implemented** |
+| Supplier grouping | **Implemented** |
+| Explanation | **Implemented** |
+| Urgency | **Implemented** |
+| CSV export | **Implemented** |
+| Human approval в UI | **Implemented** |
+| Excel extractor | **In progress** |
+| End-to-end реальные файлы → рекомендации | **In progress** |
+| Customer-level anomaly по `customer_id` | **Not implemented** |
+| Устойчивый trend / growth | **Not implemented** |
+| Отдельный forecast growth input | **Not implemented** |
+| Supplier-specific lead time | **Not implemented** |
+| Интеграция с 1С | **Not implemented** |
+| Автоматическая отправка поставщику | **Not implemented by design** |
 
 ---
 
 ## 3. Архитектура
 
-Текущий целевой поток:
+Целевой поток:
 
 ```text
 Dashboard
    │
    │ POST /api/upload
-   │ multipart/form-data: files[]
    ▼
 FastAPI backend
    │
-   ├─ каждый файл → extractor /extract
-   ├─ canonical fragments → SQLite cache
+   ├─ файл → extractor /extract
+   ├─ canonical fragment → SQLite cache
    ├─ сборка данных по поставщику
    └─ process_supplier(...)
             │
             ▼
-      JSON recommendations
+       JSON recommendations
             │
             ▼
 Dashboard
 → таблица
 → фильтры
-→ проверка
-→ подтверждение
+→ approve
 → CSV export
 ```
 
-Backend хранит последние загруженные данные по поставщику и типу файла. Поэтому после первой полной загрузки можно обновлять только изменившийся источник, например `transit`, не загружая заново всю историю продаж.
-
-Для расчёта обязательны:
+Для расчёта backend ожидает фрагменты типов:
 
 ```text
 sales
@@ -121,16 +128,22 @@ moq
 
 ### `POST /api/upload`
 
-Принимает несколько файлов:
+Принимает несколько файлов одним multipart-запросом:
 
 ```text
 multipart/form-data
 files: File[]
 ```
 
-Каждый файл отправляется в extractor отдельным запросом. После получения нормализованных fragments backend обновляет SQLite cache и синхронно пересчитывает затронутых поставщиков.
+Backend:
 
-Ответ:
+1. отправляет каждый файл в extractor;
+2. сохраняет canonical fragments в SQLite;
+3. собирает данные по затронутым поставщикам;
+4. запускает `process_supplier(...)`;
+5. возвращает готовый JSON.
+
+Ожидаемый ответ:
 
 ```json
 {
@@ -156,15 +169,17 @@ files: File[]
 }
 ```
 
-Допустимые значения `urgency`:
+`urgency`:
 
-- `critical`;
-- `soon`;
-- `planned`.
+```text
+critical
+soon
+planned
+```
 
 ### `POST /api/recalculate`
 
-Принимает уже нормализованный Contract 1 и запускает расчёт без загрузки файлов.
+Принимает уже нормализованные данные и запускает расчёт без загрузки файлов.
 
 ### `GET /api/health`
 
@@ -178,24 +193,26 @@ files: File[]
 
 ## 5. Методология расчёта
 
-Расчёт выполняется отдельно для каждого SKU внутри `process_supplier(...)`.
+Расчёт выполняется по каждому SKU внутри `process_supplier(...)`.
 
 ### 5.1. Исключение крупных разовых транзакций
 
-Текущая реализация использует устойчивый эвристический критерий.
-
-Для истории `qty`:
+Используется robust-эвристика:
 
 ```text
 large transaction:
 abs(qty) > median(abs(qty)) × 4
 ```
 
-Такие операции исключаются из регулярного спроса только если они редкие — не более `15%` истории.
+Крупные операции исключаются из регулярного спроса только если они редкие:
 
-Если крупные продажи повторяются регулярно, алгоритм не удаляет их автоматически, чтобы не уничтожить возможный сезонный паттерн.
+```text
+share of large transactions <= 15%
+```
 
-> TODO: отдельный customer-level detector для официального требования о крупной покупке одного обезличенного клиента.
+Если крупные продажи повторяются часто, алгоритм не исключает их автоматически.
+
+> Ограничение: отдельный анализ аномалии по обезличенному `customer_id` пока не реализован.
 
 ### 5.2. Агрегация спроса
 
@@ -207,7 +224,7 @@ YYYY-MM → sum(qty)
 
 ### 5.3. Stockout / упущенный спрос
 
-Stockout определяется по остатку:
+Stockout определяется только по данным остатков:
 
 ```text
 monthly_stock <= 0
@@ -215,12 +232,10 @@ monthly_stock <= 0
 
 Нулевые продажи сами по себе stockout не означают.
 
-Для stockout-месяца спрос оценивается:
+Для stockout-месяца спрос восстанавливается:
 
 1. по среднему спросу того же календарного месяца в другие годы;
-2. если такой истории нет — по среднему спросу остальных non-stockout месяцев.
-
-Таким образом периоды отсутствия товара не должны искусственно занижать будущий forecast.
+2. если такой истории нет — по среднему non-stockout спросу.
 
 ### 5.4. Сезонность
 
@@ -233,8 +248,6 @@ average demand for calendar month
 average demand for all months
 ```
 
-Коэффициент `1.25` означает, что спрос этого месяца примерно на 25% выше общего среднего.
-
 ### 5.5. Forecast
 
 Текущий forecast использует последние `6` месяцев:
@@ -245,19 +258,17 @@ recent mean
 → seasonal coefficient target month
 ```
 
-Это отражает сезонность и недавний уровень спроса.
-
 > Отдельный устойчивый trend / growth factor пока не реализован.
 
 ### 5.6. Категория и safety stock
 
-Категория влияет на страховой запас через волатильность спроса.
+Для категории рассчитывается волатильность:
 
 ```text
 CV = std(monthly demand) / mean(monthly demand)
 ```
 
-Далее:
+Страховой запас:
 
 ```text
 safety_stock_days = 7 × (1 + average category CV)
@@ -271,13 +282,13 @@ safety_stock_days = 7 × (1 + average category CV)
 
 ### 5.7. Рекомендуемое количество
 
-В текущей реализации:
+Текущий default lead time:
 
 ```text
-lead_time_days = 30
+30 дней
 ```
 
-Расчёт:
+Формула:
 
 ```text
 daily_forecast = monthly_forecast / 30
@@ -298,13 +309,11 @@ recommended_qty =
 max(0, raw_need)
 ```
 
-Если задан `MOQ`, результат округляется вверх до кратности MOQ.
-
-Если последний остаток отсутствует, текущая реализация принимает его за `0` и добавляет предупреждение в explanation.
+Если задан `MOQ`, заказ округляется вверх до кратности MOQ.
 
 ### 5.8. Срочность
 
-Срочность определяется по дням покрытия текущим остатком:
+По дням покрытия текущим остатком:
 
 ```text
 < 7 дней   → critical
@@ -316,23 +325,16 @@ max(0, raw_need)
 
 ## 6. Explainability
 
-Для каждой рекомендации формируется объяснение, которое может содержать:
+Для каждой рекомендации формируется `reason`, который может включать:
 
 - прогноз спроса;
 - сезонный коэффициент;
-- размер страхового запаса;
+- страховой запас;
 - категорию;
 - stockout-коррекцию;
-- количество исключённых крупных операций;
-- объём исключённых операций;
+- исключённые крупные заказы;
 - дни покрытия текущим остатком;
-- предупреждение об отсутствующих данных остатка.
-
-В dashboard объяснение доступно через блок:
-
-```text
-Почему такой заказ?
-```
+- предупреждение об отсутствии актуального остатка.
 
 ---
 
@@ -346,29 +348,29 @@ CSS
 JavaScript ES Modules
 ```
 
-Без frontend build step и runtime-framework.
-
 Поддерживаются:
 
 - выбор нескольких файлов;
 - drag & drop;
-- удаление файлов до отправки;
+- удаление файлов перед отправкой;
 - один синхронный `POST /api/upload`;
 - loading state;
-- обработка HTTP/network/JSON ошибок;
+- HTTP/network/JSON error states;
 - partial errors;
 - KPI;
-- поиск по названию и артикулу;
+- поиск;
 - фильтр поставщика;
 - фильтр срочности;
 - группировка по поставщикам;
 - раскрываемое explanation;
-- подтверждение одной позиции;
-- подтверждение всех видимых позиций поставщика;
-- фильтр «Только подтверждённые»;
+- approve по одной позиции;
+- approve видимых позиций поставщика;
+- фильтр подтверждённых;
 - CSV export.
 
-Подтверждения существуют только на стороне браузера и сбрасываются после нового успешного расчёта или перезагрузки страницы.
+`dashboard/mock_recommendations.json` используется **только как fixture для frontend-тестов**. Рабочий dashboard его не загружает.
+
+Корневой `mock_recommendations.json` удалён как неиспользуемый.
 
 ---
 
@@ -381,6 +383,7 @@ JavaScript ES Modules
 │   ├── styles.css
 │   ├── dashboard.mjs
 │   ├── recommendations.mjs
+│   ├── mock_recommendations.json
 │   ├── package.json
 │   └── tests/
 ├── src/
@@ -407,7 +410,7 @@ JavaScript ES Modules
 
 ## 9. Установка
 
-### Python backend
+### Python
 
 Требуется Python 3.11+.
 
@@ -427,7 +430,7 @@ Windows PowerShell:
 .\.venv\Scripts\Activate.ps1
 ```
 
-Установка:
+Установка зависимостей:
 
 ```bash
 pip install -r requirements.txt
@@ -443,15 +446,15 @@ npm ci --prefix dashboard
 
 ### Extractor
 
-Extractor — ASP.NET Core проект.
-
-Для запуска требуется подходящий .NET SDK либо Docker.
+Extractor — ASP.NET Core приложение. Для локального запуска требуется .NET SDK либо Docker.
 
 ---
 
 ## 10. Запуск
 
-### Backend
+### Основной backend + dashboard
+
+FastAPI сам раздаёт содержимое `dashboard/`, поэтому для локального запуска достаточно:
 
 Linux / macOS:
 
@@ -466,15 +469,21 @@ $env:PYTHONPATH="src"
 uvicorn api.main:app --host 127.0.0.1 --port 8001
 ```
 
+Dashboard:
+
+```text
+http://127.0.0.1:8001/
+```
+
 Health check:
 
 ```text
 http://127.0.0.1:8001/api/health
 ```
 
-### Dashboard
+Так dashboard и `/api/upload` работают с одного origin.
 
-Для просмотра интерфейса:
+### Только просмотр dashboard без API
 
 ```bash
 python3 -m http.server 8000 --bind 127.0.0.1 --directory dashboard
@@ -486,7 +495,7 @@ python3 -m http.server 8000 --bind 127.0.0.1 --directory dashboard
 http://127.0.0.1:8000/
 ```
 
-> Важно: dashboard вызывает относительный `/api/upload`. Обычный `python -m http.server` показывает UI, но не проксирует API. Для полноценного browser end-to-end dashboard и API должны быть доступны через общий origin/reverse proxy либо frontend должен быть настроен на backend URL.
+В этом режиме UI доступен, но `/api/upload` отсутствует.
 
 ### Docker Compose
 
@@ -494,15 +503,14 @@ http://127.0.0.1:8000/
 docker compose up --build
 ```
 
-Определены сервисы:
+Сервисы:
 
 ```text
 extractor : 8080
 backend   : 8001
-dashboard : 8000
 ```
 
-Текущий dashboard container — обычный static HTTP server и самостоятельно `/api/upload` на backend не проксирует.
+Dashboard входит в образ backend и раздаётся через FastAPI.
 
 ---
 
@@ -514,8 +522,6 @@ dashboard : 8000
 OPENAI_API_KEY=
 ```
 
-Реальный ключ должен храниться только локально и не попадать в Git.
-
 Backend также использует:
 
 ```text
@@ -525,7 +531,9 @@ UPLOADS_DB_PATH
 
 В `docker-compose.yml` они задаются для backend автоматически.
 
-`OPENAI_API_KEY` используется OpenAI field-mapping клиентом extractor. Текущий endpoint `/extract` пока не вызывает финальный mapping pipeline.
+`OPENAI_API_KEY` используется OpenAI-клиентом extractor для field mapping. Текущий `/extract` пока не использует финальный mapping pipeline.
+
+Секреты не должны попадать в Git.
 
 ---
 
@@ -537,7 +545,7 @@ UPLOADS_DB_PATH
 PYTHONPATH=src pytest -q
 ```
 
-Проверено на текущем репозитории:
+Проверено на текущем архиве:
 
 ```text
 13 passed
@@ -550,7 +558,7 @@ npm test --prefix dashboard
 npm run check --prefix dashboard
 ```
 
-Проверено на текущем репозитории:
+Проверено на текущем архиве:
 
 ```text
 19 passed
@@ -560,43 +568,44 @@ Frontend-тесты покрывают:
 
 - выбор и удаление файлов;
 - drag & drop;
-- отправку всех файлов одним `POST`;
-- блокировку повторной отправки;
+- multipart POST;
 - loading state;
-- успешное обновление таблицы;
+- защиту от повторной отправки;
+- обновление результатов;
 - HTTP/network/JSON errors;
 - partial errors;
 - фильтры;
 - approve;
-- explanations;
+- explanation;
 - CSV export.
 
-Backend-тесты покрывают в том числе:
+Backend-тесты покрывают:
 
 - сезонность;
 - stockout compensation;
 - устойчивость к крупной разовой продаже;
 - влияние `in_transit`;
-- влияние категории на safety stock;
-- explanation и urgency;
+- влияние категории;
+- explanation;
+- urgency;
 - API contracts;
-- SQLite cache частичных обновлений.
+- SQLite cache.
 
 ---
 
 ## 13. Must Have — текущее покрытие
 
-| Официальное требование | Статус |
+| Требование | Статус |
 |---|---|
-| Базовая потребность по SKU | **Partial / mostly implemented** |
-| История продаж | **Implemented in calculation contract** |
+| Базовый расчёт по SKU | **Partial / mostly implemented** |
+| История продаж | **Implemented** |
 | Текущие остатки | **Implemented** |
 | Товары в пути | **Implemented** |
 | Категория товара | **Implemented** |
-| Отдельный forecast growth input | **Not implemented** |
+| Forecast growth input | **Not implemented** |
 | Сезонность | **Implemented** |
 | Устойчивый рост спроса | **Not implemented separately** |
-| Stockout / lost demand compensation | **Implemented** |
+| Stockout / lost demand | **Implemented** |
 | Крупные разовые заказы | **Implemented at transaction level** |
 | Крупная продажа одному клиенту | **Not implemented separately** |
 | Supplier grouping | **Implemented** |
@@ -612,27 +621,25 @@ Backend-тесты покрывают в том числе:
 
 ## 14. Ограничения текущего MVP
 
-1. `extractor /extract` пока не возвращает canonical fragment, который ожидает `/api/upload`, поэтому полный real-file end-to-end ещё не завершён.
+1. `extractor /extract` пока возвращает preview Excel-таблицы, а backend ожидает canonical fragment — поэтому real-file end-to-end ещё не завершён.
 2. Customer-level anomaly detection по обезличенному клиенту отсутствует.
-3. Отдельная модель устойчивого trend / growth отсутствует.
-4. Внешний прогноз прироста не передаётся в расчёт.
+3. Отдельный устойчивый trend / growth отсутствует.
+4. Внешний forecast growth не передаётся в расчёт.
 5. Lead time сейчас фиксирован значением `30` дней.
 6. Нет прямой интеграции с 1С.
-7. CSV export выполняется в браузере.
-8. Approve — UI-состояние, а не размещение заказа у поставщика.
-9. Dashboard и API при отдельном локальном запуске требуют общего origin/proxy для работы относительного `/api/upload`.
-10. OpenAI используется только в extractor field-mapping модуле; расчётное ядро является детерминированным и не требует LLM.
+7. Approve — UI-состояние, а не размещение заказа у поставщика.
+8. OpenAI используется только в extractor field-mapping модуле; расчётное ядро детерминированное и LLM не требует.
 
 ---
 
 ## 15. Privacy & Security
 
 - клиентские данные должны оставаться обезличенными;
-- не использовать неанонимизированные данные клиентов;
+- нельзя использовать неанонимизированные данные клиентов;
 - API keys и пароли не должны попадать в Git;
 - исходные данные партнёра не должны публиковаться без разрешения;
 - `.env` не должен коммититься;
-- рекомендации должны проверяться ответственным сотрудником;
+- итоговые рекомендации проверяет ответственный сотрудник;
 - заказ не отправляется поставщику автоматически.
 
 ---
@@ -642,16 +649,13 @@ Backend-тесты покрывают в том числе:
 P0 до полного end-to-end:
 
 - [ ] привести `/extract` к canonical fragment contract;
-- [ ] проверить реальные файлы обоих поставщиков через `/api/upload`;
-- [ ] обеспечить общий origin/proxy для dashboard → API;
+- [ ] прогнать реальные файлы поставщиков через `/api/upload`;
 - [ ] выполнить полный smoke test:
   `upload → extract → cache → calculate → JSON → dashboard`.
 
-Следующие улучшения:
+После P0:
 
 - [ ] customer-level anomaly detection;
 - [ ] устойчивый trend / growth;
-- [ ] отдельный forecast growth input;
-- [ ] supplier-specific lead time;
-- [ ] при необходимости — XLSX export;
-- [ ] заменить оставшиеся demo/mock fixtures только там, где они не нужны тестам.
+- [ ] forecast growth input;
+- [ ] supplier-specific lead time.
