@@ -144,6 +144,7 @@ def build_reason(
     stockout_months: set[str],
     removed_orders: list[dict[str, Any]],
     days_of_stock: float,
+    stock_month_is_missing: bool,
 ) -> str:
     parts = [f"Прогноз спроса ~{monthly_forecast:.0f} шт/мес (сезонный коэф. ×{seasonal_index:.2f})"]
     if stockout_months:
@@ -155,6 +156,8 @@ def build_reason(
         parts.append("текущего спроса по товару не зафиксировано")
     else:
         parts.append(f"текущего остатка хватит на {days_of_stock:.0f} дн.")
+    if stock_month_is_missing:
+        parts.append("ВНИМАНИЕ: остаток за текущий месяц не указан в отчёте, принят за 0 - проверьте вручную")
     return "; ".join(parts) + "."
 
 
@@ -199,7 +202,11 @@ def process_item(
     demand_for_lead_time = daily_forecast * lead_time_days
     safety_stock = daily_forecast * safety_stock_days
 
+    # Решение команды: пустая ячейка остатка = 0. Парсер не должен превращать пустое
+    # в 0 сам по себе (это скрыло бы факт "нет данных") - здесь это единственное
+    # место, где это решение принимается, и оно явно помечается в обосновании.
     current_stock = monthly_stock.get(last_month, 0) if last_month else 0
+    stock_month_is_missing = bool(last_month and last_month not in monthly_stock)
     in_transit_qty = item.get("in_transit_qty", 0) or 0
 
     raw_need = demand_for_lead_time + safety_stock - current_stock - in_transit_qty
@@ -215,6 +222,7 @@ def process_item(
         stockout_months=stockout_months,
         removed_orders=removed_tx,
         days_of_stock=days_of_stock,
+        stock_month_is_missing=stock_month_is_missing,
     )
 
     return {
