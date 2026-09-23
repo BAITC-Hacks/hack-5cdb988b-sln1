@@ -145,8 +145,12 @@ def build_reason(
     removed_orders: list[dict[str, Any]],
     days_of_stock: float,
     stock_month_is_missing: bool,
+    safety_stock_days: float,
+    category: str | None,
 ) -> str:
     parts = [f"Прогноз спроса ~{monthly_forecast:.0f} шт/мес (сезонный коэф. ×{seasonal_index:.2f})"]
+    category_note = f" по категории «{category}»" if category else ""
+    parts.append(f"страховой запас {safety_stock_days:.0f} дн. (по волатильности спроса{category_note})")
     if stockout_months:
         parts.append(f"скорректировано на дефицит в {len(stockout_months)} мес. ({', '.join(sorted(stockout_months))})")
     if removed_orders:
@@ -223,6 +227,8 @@ def process_item(
         removed_orders=removed_tx,
         days_of_stock=days_of_stock,
         stock_month_is_missing=stock_month_is_missing,
+        safety_stock_days=safety_stock_days,
+        category=item.get("category"),
     )
 
     return {
@@ -245,6 +251,43 @@ def process_item(
     }
 
 
+def _monthly_sales_cv(item: dict[str, Any]) -> float:
+    """Коэффициент вариации спроса (std/mean) по очищенной от выбросов помесячной истории."""
+    cleaned_tx, _ = clean_outlier_transactions(item.get("transactions", []))
+    values = list(aggregate_monthly(cleaned_tx).values())
+    if len(values) < 2:
+        return 0.0
+    mean = statistics.mean(values)
+    if mean == 0:
+        return 0.0
+    return statistics.pstdev(values) / mean
+
+
+def compute_category_safety_days(
+    items: list[dict[str, Any]], base_days: float = 7.0, min_days: float = 5.0, max_days: float = 21.0
+) -> dict[Any, float]:
+    """Страховой запас (в днях) по категории: чем нестабильнее спрос у товаров этой
+    категории, тем больше буфер. Так категория реально влияет на recommended_qty,
+    а не остаётся просто текстовой подписью (см. must-have 1)."""
+    cv_by_category: dict[Any, list[float]] = {}
+    for item in items:
+        cv_by_category.setdefault(item.get("category"), []).append(_monthly_sales_cv(item))
+
+    safety_days_by_category = {}
+    for category, cvs in cv_by_category.items():
+        avg_cv = statistics.mean(cvs) if cvs else 0.0
+        days = base_days * (1 + avg_cv)
+        safety_days_by_category[category] = min(max(days, min_days), max_days)
+    return safety_days_by_category
+
+
 def process_supplier(supplier_payload: dict[str, Any], **kwargs) -> dict[str, Any]:
-    items = [process_item(item, **kwargs) for item in supplier_payload.get("items", [])]
+    items_data = supplier_payload.get("items", [])
+    category_safety_days = compute_category_safety_days(items_data)
+
+    items = []
+    for item in items_data:
+        item_kwargs = dict(kwargs)
+        item_kwargs.setdefault("safety_stock_days", category_safety_days.get(item.get("category"), 7.0))
+        items.append(process_item(item, **item_kwargs))
     return {"supplier": supplier_payload["supplier"], "items": items}

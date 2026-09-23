@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from calc_engine.pipeline import forecast_month, compute_seasonality_index, process_item
+from calc_engine.pipeline import forecast_month, compute_seasonality_index, process_item, process_supplier
 
 FIXTURE_PATH = Path(__file__).parent / "fixtures" / "mock_input.json"
 
@@ -100,6 +100,77 @@ def test_recommendation_sensitive_to_in_transit_qty(fixture_data):
 
     assert result_with_transit["recommended_qty"] < result_no_transit["recommended_qty"]
     assert result_with_transit["recommended_qty"] == 0  # 1000 уже с лихвой покрывает спрос
+
+
+# --- Must-have 1: категория товара реально влияет на расчёт, а не только на дисплей ---
+
+def _flat_item(sku: str, category: str, qty: float = 25) -> dict:
+    months = [f"2025-{m:02d}" for m in range(1, 13)]
+    return {
+        "sku": sku,
+        "name": sku,
+        "category": category,
+        "moq": 1,
+        "transactions": [{"date": f"{m}-15", "order_id": f"O-{sku}-{m}", "qty": qty} for m in months],
+        "monthly_stock": {m: 300 for m in months},
+        "in_transit_qty": 0,
+    }
+
+
+def _volatile_item(sku: str, category: str) -> dict:
+    months = [f"2025-{m:02d}" for m in range(1, 13)]
+    return {
+        "sku": sku,
+        "name": sku,
+        "category": category,
+        "moq": 1,
+        "transactions": [
+            {"date": f"{m}-15", "order_id": f"O-{sku}-{m}", "qty": (80 if i % 2 == 0 else 2)}
+            for i, m in enumerate(months)
+        ],
+        "monthly_stock": {m: 300 for m in months},
+        "in_transit_qty": 0,
+    }
+
+
+def test_category_volatility_changes_recommended_qty():
+    target = {
+        "sku": "SKU-CATEGORY-TEST",
+        "name": "Целевой товар",
+        "moq": 1,
+        "transactions": [
+            {"date": f"2025-{m:02d}-15", "order_id": f"O-target-{m}", "qty": 25} for m in range(1, 13)
+        ],
+        "monthly_stock": {f"2025-{m:02d}": 10 for m in range(1, 13)},
+        "in_transit_qty": 0,
+    }
+
+    stable_payload = {
+        "supplier": "TEST",
+        "items": [
+            {**target, "category": "Стабильная категория"},
+            _flat_item("PEER-A", "Стабильная категория"),
+            _flat_item("PEER-B", "Стабильная категория"),
+        ],
+    }
+    volatile_payload = {
+        "supplier": "TEST",
+        "items": [
+            {**target, "category": "Волатильная категория"},
+            _volatile_item("PEER-C", "Волатильная категория"),
+            _volatile_item("PEER-D", "Волатильная категория"),
+        ],
+    }
+
+    stable_result = process_supplier(stable_payload)
+    volatile_result = process_supplier(volatile_payload)
+
+    stable_qty = next(i for i in stable_result["items"] if i["sku"] == "SKU-CATEGORY-TEST")["recommended_qty"]
+    volatile_qty = next(i for i in volatile_result["items"] if i["sku"] == "SKU-CATEGORY-TEST")["recommended_qty"]
+
+    # один и тот же товар, разная категория соседей по волатильности спроса ->
+    # разный страховой запас -> разная рекомендация. Категория реально влияет на расчёт.
+    assert volatile_qty > stable_qty
 
 
 # --- Must-have 5: каждая строка сопровождается обоснованием ---
