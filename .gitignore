@@ -10,3 +10,8 @@ venv/
 Thumbs.db
 .idea/
 .vscode/
+
+infra/connect/data/md-files/*.json
+infra/qdrant/storage/
+infra/redpanda/data/
+infra/redpanda/logs/
