@@ -108,7 +108,6 @@ def _build_contract1_from_storage(supplier: str) -> dict[str, Any] | None:
 
 @app.post("/api/upload")
 async def upload(files: list[UploadFile]) -> dict[str, Any]:
-    affected_suppliers: set[str] = set()
     upload_errors = []
 
     for file in files:
@@ -125,11 +124,10 @@ async def upload(files: list[UploadFile]) -> dict[str, Any]:
             continue
 
         storage.upsert_fragment(fragment["supplier"], fragment["file_type"], fragment["items"])
-        affected_suppliers.add(fragment["supplier"])
 
     results = []
     errors = list(upload_errors)
-    for supplier_name in affected_suppliers:
+    for supplier_name in storage.known_suppliers():
         contract1 = _build_contract1_from_storage(supplier_name)
         if contract1 is None:
             have = set(storage.get_supplier_fragments(supplier_name).keys())

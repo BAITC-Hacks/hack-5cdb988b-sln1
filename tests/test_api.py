@@ -116,6 +116,48 @@ def test_upload_reports_missing_required_file_types(monkeypatch):
     assert body["errors"] == [{"supplier": "NEWSUP", "error": "не хватает файлов: stock, transit"}]
 
 
+def test_upload_response_includes_previously_uploaded_suppliers(monkeypatch):
+    _patch_extractor(monkeypatch, [
+        {"supplier": "SUPA", "file_type": "sales", "items": {
+            "SKU-A": {"name": "Товар A", "transactions": [
+                {"date": f"2025-{m:02d}-15", "order_id": f"O{m}", "qty": 10} for m in range(1, 13)
+            ]},
+        }},
+        {"supplier": "SUPA", "file_type": "stock", "items": {"SKU-A": {"monthly_stock": {"2025-12": 50}}}},
+        {"supplier": "SUPA", "file_type": "transit", "items": {"SKU-A": {"incoming_shipments": []}}},
+    ])
+    first = client.post(
+        "/api/upload",
+        files=[
+            ("files", ("sales.csv", b"data", "text/csv")),
+            ("files", ("stock.csv", b"data", "text/csv")),
+            ("files", ("transit.csv", b"data", "text/csv")),
+        ],
+    )
+    assert [s["supplier"] for s in first.json()["suppliers"]] == ["SUPA"]
+
+    _patch_extractor(monkeypatch, [
+        {"supplier": "SUPB", "file_type": "sales", "items": {
+            "SKU-B": {"name": "Товар B", "transactions": [
+                {"date": f"2025-{m:02d}-15", "order_id": f"O{m}", "qty": 10} for m in range(1, 13)
+            ]},
+        }},
+        {"supplier": "SUPB", "file_type": "stock", "items": {"SKU-B": {"monthly_stock": {"2025-12": 50}}}},
+        {"supplier": "SUPB", "file_type": "transit", "items": {"SKU-B": {"incoming_shipments": []}}},
+    ])
+    second = client.post(
+        "/api/upload",
+        files=[
+            ("files", ("sales_b.csv", b"data", "text/csv")),
+            ("files", ("stock_b.csv", b"data", "text/csv")),
+            ("files", ("transit_b.csv", b"data", "text/csv")),
+        ],
+    )
+
+    suppliers_in_response = {s["supplier"] for s in second.json()["suppliers"]}
+    assert suppliers_in_response == {"SUPA", "SUPB"}
+
+
 def test_upload_partial_update_reuses_previously_cached_files(monkeypatch):
     _patch_extractor(monkeypatch, [
         {"supplier": "PARTSUP", "file_type": "sales", "items": {
