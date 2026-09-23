@@ -1,0 +1,31 @@
+services:
+  extractor:
+    build:
+      context: ./src/extractor/Extractor
+      dockerfile: Extractor/Dockerfile
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    ports:
+      - "8080:8080"
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - EXTRACTOR_URL=http://extractor:8080
+    depends_on:
+      - extractor
+    ports:
+      - "8001:8001"
+
+  dashboard:
+    image: python:3.11-slim
+    working_dir: /dashboard
+    volumes:
+      - ./dashboard:/dashboard
+    command: python3 -m http.server 8000 --bind 0.0.0.0
+    ports:
+      - "8000:8000"
+    depends_on:
+      - backend

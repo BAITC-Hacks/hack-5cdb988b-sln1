@@ -3,23 +3,27 @@
 Два пути в систему:
   POST /api/recalculate — принимает уже готовый Контракт 1 (JSON), сразу считает.
                           Нужен для разработки/демо, пока парсер файлов не готов.
-  POST /api/upload       — принимает сырые файлы поставщика. Сам парсинг (чтение CSV,
-                          определение поставщика/типа файла, извлечение полей) —
-                          зона Человека 1, здесь этой логики нет и не будет: эндпоинт
-                          только вызывает parser.interface.parse_uploaded_files и
-                          передаёт результат в process_supplier.
+  POST /api/upload       — принимает сырые файлы поставщика, пересылает их отдельному
+                          .NET-сервису экстрактора (Человек 1, EXTRACTOR_URL) по HTTP,
+                          получает обратно Контракт 1 и считает через process_supplier.
+                          Парсинга/классификации файлов здесь нет и не будет - это зона
+                          сервиса экстрактора, а не этого backend'а.
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+import os
+from datetime import datetime, timezone
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from calc_engine.pipeline import process_supplier
+
+EXTRACTOR_URL = os.environ.get("EXTRACTOR_URL", "http://localhost:8080")
 
 app = FastAPI(title="ekt.kz procurement recommendations API")
 
@@ -54,22 +58,33 @@ def recalculate(payload: RecalculateRequest) -> dict[str, Any]:
     }
 
 
-@app.post("/api/upload")
-def upload(files: list[UploadFile]) -> dict[str, Any]:
-    """Принимает файлы от пользователя, парсит их (код Человека 1) и пересчитывает (наш код).
+async def call_extractor(files: list[UploadFile]) -> dict[str, Any]:
+    """Пересылает загруженные файлы в сервис экстрактора (Человек 1) и возвращает
+    ответ как есть - {"IEK": {...контракт1...}, "SystemElectric": {"error": "..."}, ...}.
+    Это единственное место, которое знает про EXTRACTOR_URL - если адрес/протокол
+    сервиса поменяется, менять нужно только здесь."""
+    multipart_files = [("files", (f.filename, await f.read(), f.content_type)) for f in files]
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(f"{EXTRACTOR_URL}/extract", files=multipart_files)
+    response.raise_for_status()
+    return response.json()
 
-    Парсер подключается сюда: src/parser/interface.py, функция parse_uploaded_files.
-    Пока этого модуля нет - явная 501, а не тихая заглушка с придуманными данными.
+
+@app.post("/api/upload")
+async def upload(files: list[UploadFile]) -> dict[str, Any]:
+    """Принимает файлы от пользователя, отправляет их сервису экстрактора (Человек 1,
+    отдельный .NET-контейнер) и пересчитывает результат через process_supplier.
+
+    Ожидаемый ответ экстрактора: {"<поставщик>": {...Контракт 1...} | {"error": "..."}}.
+    Если сервис недоступен - явная 502, а не тихая заглушка с придуманными данными.
     """
     try:
-        from parser.interface import parse_uploaded_files
-    except ImportError as exc:
+        contracts_by_supplier = await call_extractor(files)
+    except httpx.HTTPError as exc:
         raise HTTPException(
-            status_code=501,
-            detail="Парсер файлов ещё не подключён (src/parser/interface.py отсутствует).",
+            status_code=502,
+            detail=f"Сервис экстрактора недоступен или вернул ошибку ({EXTRACTOR_URL}): {exc}",
         ) from exc
-
-    contracts_by_supplier = parse_uploaded_files(files)
 
     results = []
     errors = []
