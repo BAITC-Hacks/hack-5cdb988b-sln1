@@ -74,11 +74,11 @@ def test_one_off_bulk_order_excluded_from_regular_demand(fixture_data):
 
 def test_recommendation_sensitive_to_in_transit_qty(fixture_data):
     item_no_transit = _item(fixture_data, "SKU-TRANSIT")
-    item_no_transit["in_transit_qty"] = 0
+    item_no_transit["incoming_shipments"] = []
     result_no_transit = process_item(item_no_transit)
 
     item_with_transit = _item(fixture_data, "SKU-TRANSIT")
-    item_with_transit["in_transit_qty"] = 1000
+    item_with_transit["incoming_shipments"] = [{"qty": 1000, "expected_date": "2026-01-10"}]
     result_with_transit = process_item(item_with_transit)
 
     assert result_with_transit["recommended_qty"] < result_no_transit["recommended_qty"]
@@ -94,7 +94,7 @@ def _flat_item(sku: str, category: str, qty: float = 25) -> dict:
         "moq": 1,
         "transactions": [{"date": f"{m}-15", "order_id": f"O-{sku}-{m}", "qty": qty} for m in months],
         "monthly_stock": {m: 300 for m in months},
-        "in_transit_qty": 0,
+        "incoming_shipments": [],
     }
 
 
@@ -110,7 +110,7 @@ def _volatile_item(sku: str, category: str) -> dict:
             for i, m in enumerate(months)
         ],
         "monthly_stock": {m: 300 for m in months},
-        "in_transit_qty": 0,
+        "incoming_shipments": [],
     }
 
 
@@ -123,7 +123,7 @@ def test_category_volatility_changes_recommended_qty():
             {"date": f"2025-{m:02d}-15", "order_id": f"O-target-{m}", "qty": 25} for m in range(1, 13)
         ],
         "monthly_stock": {f"2025-{m:02d}": 10 for m in range(1, 13)},
-        "in_transit_qty": 0,
+        "incoming_shipments": [],
     }
 
     stable_payload = {

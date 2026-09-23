@@ -82,7 +82,7 @@ def test_upload_builds_contract_from_multiple_files_in_one_request(monkeypatch):
         {"supplier": "IEK", "file_type": "stock", "items": {
             "SKU1": {"monthly_stock": {f"2025-{m:02d}": 100 for m in range(1, 13)}},
         }},
-        {"supplier": "IEK", "file_type": "transit", "items": {"SKU1": {"in_transit_qty": 0}}},
+        {"supplier": "IEK", "file_type": "transit", "items": {"SKU1": {"incoming_shipments": []}}},
     ])
 
     response = client.post(
@@ -125,7 +125,7 @@ def test_upload_partial_update_reuses_previously_cached_files(monkeypatch):
         {"supplier": "PARTSUP", "file_type": "stock", "items": {
             "SKUX": {"monthly_stock": {f"2025-{m:02d}": 10 for m in range(1, 13)}},
         }},
-        {"supplier": "PARTSUP", "file_type": "transit", "items": {"SKUX": {"in_transit_qty": 0}}},
+        {"supplier": "PARTSUP", "file_type": "transit", "items": {"SKUX": {"incoming_shipments": []}}},
     ])
     first = client.post(
         "/api/upload",
@@ -139,7 +139,7 @@ def test_upload_partial_update_reuses_previously_cached_files(monkeypatch):
     assert first_qty > 0
 
     _patch_extractor(monkeypatch, [
-        {"supplier": "PARTSUP", "file_type": "transit", "items": {"SKUX": {"in_transit_qty": 1000}}},
+        {"supplier": "PARTSUP", "file_type": "transit", "items": {"SKUX": {"incoming_shipments": [{"qty": 1000, "expected_date": "2026-01-10"}]}}},
     ])
     second = client.post("/api/upload", files=[("files", ("transit_update.csv", b"data", "text/csv"))])
 

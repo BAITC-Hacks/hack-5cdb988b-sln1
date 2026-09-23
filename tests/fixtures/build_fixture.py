@@ -25,7 +25,7 @@ def make_seasonal_sku() -> dict:
         "moq": 1,
         "transactions": transactions,
         "monthly_stock": monthly_stock,
-        "in_transit_qty": 0,
+        "incoming_shipments": [],
     }
 
 
@@ -46,7 +46,7 @@ def make_stockout_sku() -> dict:
         "moq": 1,
         "transactions": transactions,
         "monthly_stock": monthly_stock,
-        "in_transit_qty": 0,
+        "incoming_shipments": [],
     }
 
 
@@ -64,7 +64,7 @@ def make_outlier_sku() -> dict:
         "moq": 1,
         "transactions": transactions,
         "monthly_stock": monthly_stock,
-        "in_transit_qty": 0,
+        "incoming_shipments": [],
     }
 
 
@@ -80,7 +80,7 @@ def make_transit_sensitivity_sku() -> dict:
         "moq": 1,
         "transactions": transactions,
         "monthly_stock": monthly_stock,
-        "in_transit_qty": 0,
+        "incoming_shipments": [],
     }
 
 

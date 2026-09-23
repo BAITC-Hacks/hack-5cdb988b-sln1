@@ -79,7 +79,7 @@ def _build_contract1_from_storage(supplier: str) -> dict[str, Any] | None:
             "moq": moq.get("moq", 1),
             "transactions": sales.get("transactions", []),
             "monthly_stock": stock.get("monthly_stock", {}),
-            "in_transit_qty": transit.get("in_transit_qty", 0),
+            "incoming_shipments": transit.get("incoming_shipments", []),
         })
     return {"supplier": supplier, "items": items}
 

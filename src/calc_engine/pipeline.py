@@ -3,6 +3,7 @@ from __future__ import annotations
 import math
 import statistics
 from collections import defaultdict
+from datetime import date, timedelta
 from typing import Any
 
 
@@ -15,6 +16,16 @@ def _next_month(month_str: str) -> str:
     if month == 12:
         return f"{year + 1}-01"
     return f"{year}-{month + 1:02d}"
+
+
+def _month_start(month_str: str) -> date:
+    year, month = int(month_str[:4]), int(month_str[5:7])
+    return date(year, month, 1)
+
+
+def _parse_date(date_str: str) -> date:
+    year, month, day = (int(x) for x in date_str.split("-"))
+    return date(year, month, day)
 
 
 def clean_outlier_transactions(
@@ -103,13 +114,57 @@ def forecast_month(
     return max(deseasonalized_base * target_seasonal, 0.0)
 
 
+def simulate_incoming_shipments(
+    current_stock: float,
+    daily_forecast: float,
+    shipments: list[dict[str, Any]],
+    today: date,
+) -> dict[str, Any]:
+    if daily_forecast <= 0:
+        return {"stockout_date": None, "next_shipment_date": None, "deficit_days": 0}
+
+    events = sorted(
+        (
+            {"date": _parse_date(s["expected_date"]), "qty": s["qty"]}
+            for s in shipments
+            if s.get("expected_date")
+        ),
+        key=lambda e: e["date"],
+    )
+
+    remaining = current_stock
+    cursor = today
+    for event in events:
+        if event["date"] <= cursor:
+            remaining += event["qty"]
+            continue
+        days_available = (event["date"] - cursor).days
+        stock_needed = daily_forecast * days_available
+        if remaining < stock_needed:
+            days_to_stockout = remaining / daily_forecast
+            stockout_date = cursor + timedelta(days=days_to_stockout)
+            deficit_days = (event["date"] - stockout_date).days
+            return {
+                "stockout_date": stockout_date,
+                "next_shipment_date": event["date"],
+                "deficit_days": max(deficit_days, 0),
+            }
+        remaining -= stock_needed
+        remaining += event["qty"]
+        cursor = event["date"]
+
+    days_of_runway = remaining / daily_forecast
+    stockout_date = cursor + timedelta(days=days_of_runway)
+    return {"stockout_date": stockout_date, "next_shipment_date": None, "deficit_days": 0}
+
+
 def build_reason(
     *,
     monthly_forecast: float,
     seasonal_index: float,
     stockout_months: set[str],
     removed_orders: list[dict[str, Any]],
-    days_of_stock: float,
+    stockout_sim: dict[str, Any],
     stock_month_is_missing: bool,
     safety_stock_days: float,
     category: str | None,
@@ -122,10 +177,18 @@ def build_reason(
     if removed_orders:
         total_excluded = sum(abs(o["qty"]) for o in removed_orders)
         parts.append(f"исключено {len(removed_orders)} разовых крупных заказов ({total_excluded:.0f} шт) из расчёта регулярного спроса")
-    if days_of_stock == float("inf"):
+
+    stockout_date = stockout_sim["stockout_date"]
+    if stockout_date is None:
         parts.append("текущего спроса по товару не зафиксировано")
+    elif stockout_sim["deficit_days"] > 0:
+        parts.append(
+            f"запаса хватит до {stockout_date.isoformat()}, ближайшая поставка ожидается "
+            f"{stockout_sim['next_shipment_date'].isoformat()} - вероятен дефицит на {stockout_sim['deficit_days']} дн."
+        )
     else:
-        parts.append(f"текущего остатка хватит на {days_of_stock:.0f} дн.")
+        parts.append(f"запаса (с учётом товара в пути) хватит до {stockout_date.isoformat()}")
+
     if stock_month_is_missing:
         parts.append("ВНИМАНИЕ: остаток за текущий месяц не указан в отчёте, принят за 0 - проверьте вручную")
     return "; ".join(parts) + "."
@@ -148,6 +211,7 @@ def process_item(
 ) -> dict[str, Any]:
     transactions = item.get("transactions", [])
     monthly_stock = item.get("monthly_stock", {}) or {}
+    incoming_shipments = item.get("incoming_shipments", []) or []
 
     cleaned_tx, removed_tx = clean_outlier_transactions(transactions)
     raw_monthly_sales = aggregate_monthly(transactions)
@@ -160,6 +224,7 @@ def process_item(
     known_months = sorted(set(list(monthly_sales.keys()) + list(monthly_stock.keys())))
     last_month = reference_month or (known_months[-1] if known_months else None)
     target_month = _next_month(last_month) if last_month else None
+    today = _month_start(target_month) if target_month else None
 
     monthly_forecast = forecast_month(adjusted_sales, seasonality_index, target_month) if target_month else 0.0
     raw_monthly_forecast = forecast_month(
@@ -172,13 +237,23 @@ def process_item(
 
     current_stock = monthly_stock.get(last_month, 0) if last_month else 0
     stock_month_is_missing = bool(last_month and last_month not in monthly_stock)
-    in_transit_qty = item.get("in_transit_qty", 0) or 0
 
-    raw_need = demand_for_lead_time + safety_stock - current_stock - in_transit_qty
+    lead_time_end = today + timedelta(days=lead_time_days) if today else None
+    qty_arriving_in_lead_time = sum(
+        s["qty"] for s in incoming_shipments
+        if today and s.get("expected_date") and today <= _parse_date(s["expected_date"]) <= lead_time_end
+    )
+    total_in_transit_qty = sum(s["qty"] for s in incoming_shipments)
+
+    raw_need = demand_for_lead_time + safety_stock - current_stock - qty_arriving_in_lead_time
     moq = item.get("moq") or 1
     recommended_qty = 0 if raw_need <= 0 else math.ceil(raw_need / moq) * moq
 
-    days_of_stock = (current_stock / daily_forecast) if daily_forecast > 0 else float("inf")
+    stockout_sim = (
+        simulate_incoming_shipments(current_stock, daily_forecast, incoming_shipments, today)
+        if today else {"stockout_date": None, "next_shipment_date": None, "deficit_days": 0}
+    )
+    days_of_stock = (stockout_sim["stockout_date"] - today).days if stockout_sim["stockout_date"] else float("inf")
     urgency = compute_urgency(days_of_stock)
 
     reason = build_reason(
@@ -186,7 +261,7 @@ def process_item(
         seasonal_index=seasonality_index.get(target_month[5:7], 1.0) if target_month else 1.0,
         stockout_months=stockout_months,
         removed_orders=removed_tx,
-        days_of_stock=days_of_stock,
+        stockout_sim=stockout_sim,
         stock_month_is_missing=stock_month_is_missing,
         safety_stock_days=safety_stock_days,
         category=item.get("category"),
@@ -197,7 +272,7 @@ def process_item(
         "name": item.get("name", ""),
         "category": item.get("category"),
         "current_stock": current_stock,
-        "in_transit_qty": in_transit_qty,
+        "in_transit_qty": total_in_transit_qty,
         "recommended_qty": recommended_qty,
         "urgency": urgency,
         "reason": reason,
@@ -207,6 +282,8 @@ def process_item(
             "removed_outlier_orders": len(removed_tx),
             "stockout_months": sorted(stockout_months),
             "seasonality_index": {k: round(v, 2) for k, v in seasonality_index.items()},
+            "stockout_date": stockout_sim["stockout_date"].isoformat() if stockout_sim["stockout_date"] else None,
+            "deficit_days": stockout_sim["deficit_days"],
         },
     }
 

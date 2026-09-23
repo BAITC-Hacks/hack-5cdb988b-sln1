@@ -155,7 +155,7 @@
         "2025-11": 500,
         "2025-12": 500
       },
-      "in_transit_qty": 0
+      "incoming_shipments": []
     },
     {
       "sku": "SKU-STOCKOUT",
@@ -300,7 +300,7 @@
         "2025-11": 200,
         "2025-12": 200
       },
-      "in_transit_qty": 0
+      "incoming_shipments": []
     },
     {
       "sku": "SKU-OUTLIER",
@@ -580,7 +580,7 @@
         "2025-11": 300,
         "2025-12": 300
       },
-      "in_transit_qty": 0
+      "incoming_shipments": []
     },
     {
       "sku": "SKU-TRANSIT",
@@ -735,7 +735,7 @@
         "2025-11": 10,
         "2025-12": 10
       },
-      "in_transit_qty": 0
+      "incoming_shipments": []
     }
   ]
 }
