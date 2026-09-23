@@ -67,7 +67,8 @@ def test_recalculate_returns_valid_contract():
         assert item["recommended_qty"] >= 0
 
 
-def test_upload_returns_502_when_extractor_unreachable():
+def test_upload_returns_502_when_extractor_unreachable(monkeypatch):
+    monkeypatch.setattr(api_main, "EXTRACTOR_URL", "http://127.0.0.1:1")
     response = client.post("/api/upload", files={"files": ("test.csv", b"a;b;c\n1;2;3", "text/csv")})
     assert response.status_code == 502
 

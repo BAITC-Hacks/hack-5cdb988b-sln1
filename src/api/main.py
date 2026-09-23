@@ -96,7 +96,7 @@ def _build_contract1_from_storage(supplier: str) -> dict[str, Any] | None:
         moq = supplier_cache.get("moq", {}).get(sku, {})
         items.append({
             "sku": sku,
-            "name": sales.get("name") or stock.get("name") or transit.get("name") or "",
+            "name": sales.get("name") or stock.get("name") or transit.get("name"),
             "category": moq.get("category") or transit.get("category"),
             "moq": moq.get("moq", 1),
             "transactions": sales.get("transactions", []),

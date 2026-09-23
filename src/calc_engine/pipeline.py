@@ -269,8 +269,8 @@ def process_item(
 
     return {
         "sku": item["sku"],
-        "name": item.get("name", ""),
-        "category": item.get("category"),
+        "name": item.get("name") or item["sku"],
+        "category": item.get("category") or "Без категории",
         "current_stock": current_stock,
         "in_transit_qty": total_in_transit_qty,
         "recommended_qty": recommended_qty,
