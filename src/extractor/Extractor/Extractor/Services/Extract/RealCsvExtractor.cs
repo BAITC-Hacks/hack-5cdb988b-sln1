@@ -13,15 +13,6 @@ public static class RealCsvExtractor {
     private static readonly Regex ArrivalDateRegex = new(@"поступление до (\d{2})\.(\d{2})\.(\d{4})");
 
     public static object Extract(byte[] content, string filename) {
-        var supplier = DetectSupplier(filename);
-        var fileType = DetectFileType(filename);
-        if (supplier is null) {
-            return new Dictionary<string, object> { ["error"] = $"не удалось определить поставщика по имени файла '{filename}'" };
-        }
-        if (fileType is null) {
-            return new Dictionary<string, object> { ["error"] = $"не удалось определить тип файла по имени '{filename}'" };
-        }
-
         List<string[]> rows;
         try {
             var encoding = Encoding.GetEncoding(1251);
@@ -36,6 +27,24 @@ public static class RealCsvExtractor {
 
         if (rows.Count < 2) {
             return new Dictionary<string, object> { ["error"] = $"файл '{filename}' пуст или не содержит данных" };
+        }
+
+        var fileType = DetectFileType(filename);
+        if (fileType is null) {
+            return new Dictionary<string, object> { ["error"] = $"не удалось определить тип файла по имени '{filename}'" };
+        }
+
+        var supplier = DetectSupplier(filename) ?? DetectSupplierFromContent(rows);
+        if (supplier is null) {
+            return new Dictionary<string, object> { ["error"] = $"не удалось определить поставщика по имени файла '{filename}'" };
+        }
+
+        if (fileType is "seasonality" or "monthly_sales") {
+            return new Dictionary<string, object> {
+                ["supplier"] = supplier,
+                ["file_type"] = fileType,
+                ["items"] = new Dictionary<string, object>(),
+            };
         }
 
         Dictionary<string, object> items;
@@ -67,8 +76,28 @@ public static class RealCsvExtractor {
         return null;
     }
 
+    private static string? DetectSupplierFromContent(List<string[]> rows) {
+        var header = rows[0];
+        var nameIdx = Array.IndexOf(header, "Номенклатура");
+        if (nameIdx < 0) nameIdx = Array.IndexOf(header, "Наименование");
+        if (nameIdx < 0) return null;
+
+        var iekHits = 0;
+        var seHits = 0;
+        foreach (var row in rows.Skip(1).Take(500)) {
+            if (nameIdx >= row.Length) continue;
+            var name = row[nameIdx].ToLowerInvariant();
+            if (name.Contains("iek")) iekHits++;
+            if (name.Contains("atlas") || name.Contains("systeme") || name.Contains("schneider") || name.Contains("wessen")) seHits++;
+        }
+        if (iekHits == 0 && seHits == 0) return null;
+        return iekHits >= seHits ? "IEK" : "SystemElectric";
+    }
+
     private static string? DetectFileType(string filename) {
         var lowered = filename.ToLowerInvariant();
+        if (lowered.Contains("сезонность")) return "seasonality";
+        if (lowered.Contains("ежемесячные продажи")) return "monthly_sales";
         if (lowered.Contains("moq")) return "moq";
         if (lowered.Contains("динамика")) return "sales";
         if (lowered.Contains("остат")) return "stock";
