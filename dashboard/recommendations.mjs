@@ -3,6 +3,7 @@ export const rowKey = (supplier, item) => JSON.stringify([supplier.supplier, ite
 export function validateData(data) {
   if (!data || !Array.isArray(data.suppliers)) throw new Error('Ожидался список suppliers.');
   if (typeof data.generated_at !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(data.generated_at)) throw new Error('Некорректный generated_at.');
+  if (data.errors !== undefined && (!Array.isArray(data.errors) || data.errors.some(error => !error || typeof error.supplier !== 'string' || typeof error.error !== 'string'))) throw new Error('Некорректный список errors.');
   const ids = new Set();
   for (const s of data.suppliers) {
     if (typeof s.supplier !== 'string' || !s.supplier || ids.has(s.supplier) || !Array.isArray(s.items)) throw new Error('Некорректный поставщик.');
